@@ -1,0 +1,148 @@
+# Dev ports are random high ports (probed free). /deploy will remap to 8081+.
+name: gomiro
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      TZ: Asia/Shanghai
+      PGTZ: Asia/Shanghai
+      POSTGRES_USER: gomiro
+      POSTGRES_PASSWORD: gomiro
+      POSTGRES_DB: gomiro
+    ports:
+      - "15432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gomiro -d gomiro"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      - "16379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  api-1:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      TZ: Asia/Shanghai
+      HTTP_ADDR: :8080
+      NODE_ID: api-1
+      DATABASE_URL: postgres://gomiro:gomiro@postgres:5432/gomiro?sslmode=disable
+      REDIS_ADDR: redis:6379
+      UPLOAD_DIR: /data/uploads
+      LOG_LEVEL: info
+      WS_ORIGIN: "*"
+    volumes:
+      - uploads:/data/uploads
+    ports:
+      - "18432:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/server", "-healthcheck"]
+      interval: 8s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  api-2:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      TZ: Asia/Shanghai
+      HTTP_ADDR: :8080
+      NODE_ID: api-2
+      DATABASE_URL: postgres://gomiro:gomiro@postgres:5432/gomiro?sslmode=disable
+      REDIS_ADDR: redis:6379
+      UPLOAD_DIR: /data/uploads
+      LOG_LEVEL: info
+      WS_ORIGIN: "*"
+    volumes:
+      - uploads:/data/uploads
+    ports:
+      - "18433:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/server", "-healthcheck"]
+      interval: 8s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./frontend-user
+      dockerfile: Dockerfile
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      - "18431:80"
+    depends_on:
+      api-1:
+        condition: service_healthy
+      api-2:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 8s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  gotest:
+    image: golang:1.24-alpine
+    working_dir: /src
+    environment:
+      TZ: Asia/Shanghai
+      GOPROXY: https://goproxy.cn,direct
+    volumes:
+      - ./backend:/src
+    command: ["sleep", "infinity"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  qa:
+    build:
+      context: ./tests
+    environment:
+      TZ: Asia/Shanghai
+      API_URL: http://api-1:8080
+      BASE_URL: http://web
+      PYTHONIOENCODING: utf-8
+    depends_on:
+      web:
+        condition: service_healthy
+      api-1:
+        condition: service_healthy
+    command: ["sleep", "infinity"]
+
+volumes:
+  pgdata:
+  uploads:

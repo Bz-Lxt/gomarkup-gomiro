@@ -68,6 +68,13 @@ func main() {
 
 	bus := cluster.New(cfg.RedisAddr, cfg.RedisPassword, cfg.NodeID)
 	if err := bus.Ping(ctx); err != nil {
+		// During shutdown the root context may already be cancelled. In that
+		// case the ping error is a side-effect of cancellation, not a Redis
+		// outage, so we exit quietly instead of logging "redis" as a failure.
+		if cluster.IsCanceled(err) || (ctx != nil && ctx.Err() != nil) {
+			log.Info("shutdown during redis ping")
+			os.Exit(0)
+		}
 		log.Error("redis", "err", err)
 		os.Exit(1)
 	}

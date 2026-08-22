@@ -3,7 +3,7 @@ package cluster
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"strings"
 	"sync"
 	"time"
@@ -19,8 +19,8 @@ const (
 )
 
 type CursorFan struct {
-	BoardID string            `json:"boardId"`
-	NodeID  string            `json:"nodeId"`
+	BoardID string                  `json:"boardId"`
+	NodeID  string                  `json:"nodeId"`
 	Samples []protocol.CursorSample `json:"samples"`
 }
 
@@ -41,10 +41,10 @@ type OutMsg struct {
 }
 
 type Bus struct {
-	rdb    *redis.Client
-	node   string
-	mu     sync.RWMutex
-	ready  bool
+	rdb   *redis.Client
+	node  string
+	mu    sync.RWMutex
+	ready bool
 }
 
 func New(addr, password, nodeID string) *Bus {
@@ -59,11 +59,74 @@ func New(addr, password, nodeID string) *Bus {
 	return &Bus{rdb: rdb, node: nodeID}
 }
 
+// errRedisDisabled is returned when the bus has no underlying client.
+// It is a stable sentinel so callers can distinguish "no client" from
+// transport failures.
+var errRedisDisabled = errors.New("redis disabled")
+
+// ErrRedisDisabled returns the sentinel error used when the bus has no
+// underlying client. Exported so callers can match it with errors.Is.
+func ErrRedisDisabled() error { return errRedisDisabled }
+
+// IsCanceled reports whether err (or any error in its tree) is a context
+// cancellation. go-redis wraps cancellation as `context.DeadlineExceeded` /
+// `context.Canceled` but also surfaces it through a *redis.Error that can
+// carry the raw dial error. We unwrap both paths so a caller that cancels
+// an upstream request is never told "Redis is down".
+func IsCanceled(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	// go-redis sometimes returns the sentinel wrapped inside a net.OpError /
+	// *redis.Error string. The cheapest robust check that does not couple us
+	// to a private error type is a quick error-tree walk plus a string guard.
+	if strings.Contains(err.Error(), "context deadline exceeded") ||
+		strings.Contains(err.Error(), "context canceled") {
+		return true
+	}
+	return false
+}
+
+// classify filters a raw go-redis error through the lens of the supplied
+// context. When ctx is already done, dial/read timeouts triggered by the
+// cancellation are rebranded from "Redis failure" to ctx.Err(), so callers
+// can distinguish an active cancellation from a genuine outage.
+func classify(ctx context.Context, err error) error {
+	if err == nil {
+		return nil
+	}
+	if ctx != nil && ctx.Err() != nil {
+		// The context was cancelled/timed out. Any transport error observed
+		// at this point is a side-effect of the cancellation, not a Redis
+		// outage. Propagate the context error so callers can detect it via
+		// errors.Is(err, context.Canceled|DeadlineExceeded).
+		return ctx.Err()
+	}
+	if IsCanceled(err) {
+		// Defensive: even without ctx.Err() set the error itself might be a
+		// cancellation surfaced by the driver. Surface it as-is so errors.Is
+		// against context.Canceled/DeadlineExceeded succeeds.
+		return err
+	}
+	return err
+}
+
 func (b *Bus) Ping(ctx context.Context) error {
 	if b == nil || b.rdb == nil {
-		return fmt.Errorf("redis disabled")
+		return errRedisDisabled
 	}
-	return b.rdb.Ping(context.Background()).Err()
+	// Honour the caller's context. Previously we passed context.Background()
+	// here, which meant a cancelled upstream request still kicked off a dial
+	// against Redis; the resulting "dial tcp ..." error was then recorded as
+	// a Redis outage by the health-check / retry loops.
+	pingCtx := ctx
+	if pingCtx == nil {
+		pingCtx = context.Background()
+	}
+	return classify(pingCtx, b.rdb.Ping(pingCtx).Err())
 }
 
 func (b *Bus) Close() error {
@@ -240,11 +303,27 @@ func (b *Bus) WaitReady(ctx context.Context, attempts int) error {
 			b.MarkReady(true)
 			return nil
 		}
+		// If the caller gave up, surface the cancellation immediately rather
+		// than retrying and ultimately reporting a dial error as "Redis down".
+		if IsCanceled(last) || (ctx != nil && ctx.Err() != nil) {
+			if ctx != nil && ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return last
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(200 * time.Millisecond):
 		}
+	}
+	// All attempts exhausted. If the final error was just a cancellation, do
+	// not mislabel it as a Redis outage.
+	if IsCanceled(last) {
+		if ctx != nil && ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return last
 	}
 	return last
 }

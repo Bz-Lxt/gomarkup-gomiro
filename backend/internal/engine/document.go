@@ -69,7 +69,13 @@ func (d *Document) Restore(snap *model.Snapshot) {
 		}
 	}
 	for gid, ids := range snap.Groups {
-		d.Groups[gid] = ids
+		// Defensive copy: the caller's snapshot (and its backing slices) may be
+		// owned by a decode cache that gets cleared and reused after Restore
+		// returns. If we aliased the slice headers here, later cache reuse would
+		// mutate the live document's group membership even though each shape's
+		// GroupID (cloned above) stays put — the next save would then persist an
+		// inconsistent grouping. Mirror Snapshot/ApplyGroup and copy the slice.
+		d.Groups[gid] = append([]string(nil), ids...)
 	}
 	d.Dirty = false
 }

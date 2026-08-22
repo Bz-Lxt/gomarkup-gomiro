@@ -40,6 +40,14 @@ func (d *Document) ApplyCreate(author, clientOpID string, shape *model.Shape) (R
 }
 
 func (d *Document) ApplyUpdate(author, clientOpID string, base uint64, targetID string, patch map[string]any) (Result, error) {
+	// Reject empty/no-op patches before consuming a seq number. An empty patch
+	// carries no field changes and must never advance the server sequence or
+	// the shape version, otherwise reconnecting clients see a phantom version
+	// bump and incorrectly believe they are behind.
+	if len(patch) == 0 {
+		cur := d.Get(targetID)
+		return Result{Decision: Reject, Reason: protocol.RejectInvalid, Shape: cur, TargetID: targetID, Kind: protocol.OpUpdate}, nil
+	}
 	res := d.ResolveUpdate(author, clientOpID, base, targetID, patch)
 	if res.Decision != Accept {
 		return res, nil

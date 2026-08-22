@@ -153,7 +153,8 @@ func SanitizeUpdatePatch(raw json.RawMessage) (map[string]any, error) {
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return nil, Fail(ErrBadJSON, "patch is not an object")
 	}
-	if len(m) == 0 && m != nil {
+	// A JSON null unmarshals to a nil map with len 0; catch both null and {}.
+	if len(m) == 0 {
 		return nil, Fail(ErrBadField, "empty patch")
 	}
 	if len(m) > MaxPatchFields {

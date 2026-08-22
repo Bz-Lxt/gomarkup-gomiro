@@ -116,7 +116,12 @@ func Encode(typ, id string, payload any) ([]byte, error) {
 			payloadBuffers.Put(buf)
 			return nil, err
 		}
-		raw = buf.Bytes()
+		// Copy before returning the buffer to the pool: buf.Bytes() aliases the
+		// buffer's internal array, and another goroutine calling Encode
+		// concurrently would Reset/overwrite that array while json.Marshal below
+		// is still reading raw — causing cross-room payload corruption and
+		// truncated JSON ("unexpected end of JSON input").
+		raw = append([]byte(nil), buf.Bytes()...)
 		payloadBuffers.Put(buf)
 	}
 	return json.Marshal(Envelope{V: ProtoVersion, Type: typ, ID: id, Payload: raw})

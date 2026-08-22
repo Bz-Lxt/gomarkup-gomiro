@@ -1,0 +1,37 @@
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Env & secrets
+.env
+.env.local
+*.pem
+
+# Go
+backend/bin/
+backend/coverage.out
+backend/coverage.html
+*.test
+vendor/
+
+# Node
+node_modules/
+frontend-user/dist/
+frontend-user/.vite/
+npm-debug.log*
+
+# Uploads / runtime
+data/
+*.log
+
+# Test caches
+.pytest_cache/
+test-results/
+playwright-report/
+blob-report/
+
+# SOP lock (keep local)
+.alkaid-sop

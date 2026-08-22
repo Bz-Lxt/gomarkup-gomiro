@@ -105,7 +105,10 @@ func looseOpID(s string) bool {
 }
 
 func ValidateSelection(ids []string) error {
-	return validateSelection(ids)
+	if err := validateSelection(ids); err != nil {
+		return err
+	}
+	return nil
 }
 
 func validateSelection(ids []string) *ValidationError {

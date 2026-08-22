@@ -71,7 +71,6 @@ func main() {
 		log.Error("redis", "err", err)
 		os.Exit(1)
 	}
-	bus.MarkReady(true)
 	defer bus.Close()
 
 	met := &obs.Metrics{}

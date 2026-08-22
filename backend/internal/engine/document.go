@@ -54,6 +54,7 @@ func (d *Document) Snapshot() *model.Snapshot {
 
 func (d *Document) Restore(snap *model.Snapshot) {
 	d.mu.Lock()
+	defer d.mu.Unlock()
 	d.Shapes = map[string]*model.Shape{}
 	d.Groups = map[string][]string{}
 	if snap == nil {
@@ -61,7 +62,6 @@ func (d *Document) Restore(snap *model.Snapshot) {
 		d.Dirty = false
 		return
 	}
-	defer d.mu.Unlock()
 	d.ServerSeq = snap.ServerSeq
 	for id, s := range snap.Shapes {
 		if s != nil {

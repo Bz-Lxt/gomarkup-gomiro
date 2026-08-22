@@ -108,7 +108,7 @@ func Encode(typ, id string, payload any) ([]byte, error) {
 	if payload != nil {
 		b, err := json.Marshal(payload)
 		if err != nil {
-			return nil, fmt.Errorf("encode payload: %v", err)
+			return nil, fmt.Errorf("encode payload: %w", err)
 		}
 		raw = b
 	}

@@ -63,8 +63,8 @@ func (b *Bus) Ping(ctx context.Context) error {
 	if b == nil || b.rdb == nil {
 		return fmt.Errorf("redis disabled")
 	}
-	var err error
-	if err := b.rdb.Ping(ctx).Err(); err == nil {
+	err := b.rdb.Ping(ctx).Err()
+	if err == nil {
 		b.MarkReady(true)
 	} else {
 		b.MarkReady(false)

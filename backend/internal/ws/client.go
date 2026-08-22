@@ -174,8 +174,6 @@ func (c *Client) noteOp(now time.Time, max int) bool {
 func (c *Client) SetCursor(x, y float32) {
 	c.mu.Lock()
 	c.cursorX = x
-	c.mu.Unlock()
-	c.mu.Lock()
 	c.cursorY = y
 	c.mu.Unlock()
 }
